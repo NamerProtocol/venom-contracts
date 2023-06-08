@@ -1,0 +1,97 @@
+pragma ever-solidity >=0.61.2;
+pragma AbiHeader expire;
+pragma AbiHeader pubkey;
+pragma AbiHeader time;
+
+// importing all standards bases
+import "@itgold/everscale-tip/contracts/TIP4_1/TIP4_1Nft.sol";
+import "@itgold/everscale-tip/contracts/TIP4_2/TIP4_2Nft.sol";
+import "@itgold/everscale-tip/contracts/TIP4_3/TIP4_3Nft.sol";
+
+contract NameNft is TIP4_1Nft, TIP4_2Nft, TIP4_3Nft {
+    address root;
+    uint128 hPrice;
+    string name;
+
+    // just call constructors of all implemented classes
+    constructor(
+        address owner,
+        address _root,
+        string _name,
+        uint128 _price,
+        address sendGasTo,
+        uint128 remainOnNft,
+        string json, // for TIP-4.2
+        TvmCell codeIndex, // for TIP-4.3
+        uint128 indexDeployValue, // for TIP-4.3
+        uint128 indexDestroyValue // for TIP-4.3
+    )
+        public
+        TIP4_1Nft(owner, sendGasTo, remainOnNft)
+        TIP4_2Nft(json)
+        TIP4_3Nft(indexDeployValue, indexDestroyValue, codeIndex)
+    {
+        tvm.accept();
+        //         require(msg.pubkey() == tvm.pubkey(), 100);
+        name = _name;
+        root = _root;
+        hPrice = _price;
+    }
+
+    function getDomainInfo() external view responsible returns(
+        uint256 id, 
+        address domainOwner, 
+        address domainRoot, 
+        string domainName,
+        uint128 domainHPrice)
+    {
+        return {value: 0, flag: 64, bounce: false} (
+            _id,
+            _owner,
+            root,
+            name,
+            hPrice
+        );
+    }
+
+    function getName() external view responsible returns(string) {
+        return {value: 0, flag: 64, bounce: false} name;
+    }
+
+    // Also, you need to implement some handlers, linked with NFT transferring
+    // Maybe you need to implement something special, but you can also use default handlers
+
+    function _beforeTransfer(
+        address to,
+        address sendGasTo,
+        mapping(address => CallbackParams) callbacks
+    ) internal virtual override(TIP4_1Nft, TIP4_3Nft) {
+        TIP4_3Nft._destructIndex(sendGasTo);
+    }
+
+    function _afterTransfer(
+        address to,
+        address sendGasTo,
+        mapping(address => CallbackParams) callbacks
+    ) internal virtual override(TIP4_1Nft, TIP4_3Nft) {
+        TIP4_3Nft._deployIndex();
+    }
+
+    function _beforeChangeOwner(
+        address oldOwner,
+        address newOwner,
+        address sendGasTo,
+        mapping(address => CallbackParams) callbacks
+    ) internal virtual override(TIP4_1Nft, TIP4_3Nft) {
+        TIP4_3Nft._destructIndex(sendGasTo);
+    }
+
+    function _afterChangeOwner(
+        address oldOwner,
+        address newOwner,
+        address sendGasTo,
+        mapping(address => CallbackParams) callbacks
+    ) internal virtual override(TIP4_1Nft, TIP4_3Nft) {
+        TIP4_3Nft._deployIndex();
+    }
+}

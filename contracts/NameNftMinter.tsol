@@ -1,0 +1,108 @@
+pragma ever-solidity >=0.61.2;
+
+pragma AbiHeader expire;
+pragma AbiHeader time;
+pragma AbiHeader pubkey;
+
+import "@itgold/everscale-tip/contracts/TIP4_2/TIP4_2Collection.sol";
+import "@itgold/everscale-tip/contracts/TIP4_3/TIP4_3Collection.sol";
+import "./NameNft.tsol";
+
+contract NameNftMinter is TIP4_2Collection, TIP4_3Collection {
+    /**               
+     * Errors
+     **/
+    uint8 constant sender_is_not_owner = 201;
+    uint8 constant value_is_less_than_required = 202;
+    uint8 constant unknown_root = 203;
+    uint8 constant already_registered = 204;
+    uint8 constant not_for_sale = 205;
+    uint8 _nonce = 127;
+
+    /// _remainOnNft - the number of crystals that will remain after the entire mint
+    /// process is completed on the Nft contract
+    uint128 _remainOnNft = 1 ton;
+
+    mapping (address => uint128) subDomainPrices;
+
+    mapping (uint256 => bool) mintedNames; // hash => is minted?
+    mapping (uint256 => address) idToOwner; // id => owner
+    mapping (address => address) adddressToOwner;
+    mapping (address => uint128) registeredUntil;
+    uint128 constant hTaxRate = 1*10**8; // 0.1%
+    uint128 constant hTax100 = 100*10**9; // decimals 9
+
+    constructor(
+        TvmCell codeNft,
+        string json,
+        TvmCell codeIndex,
+        TvmCell codeIndexBasis
+    ) public TIP4_1Collection(codeNft) TIP4_2Collection(json) TIP4_3Collection(codeIndex, codeIndexBasis) {
+        registeredUntil[address(this)] = 2**128 - 1;
+        subDomainPrices[address(this)] = 5 ton;
+        tvm.accept();
+    }
+
+    function mintNft(
+        address root, 
+        uint128 hPrice,
+        string name, 
+        string json
+    ) external virtual {
+        tvm.accept();
+        require(subDomainPrices[root] > 0, not_for_sale);
+        uint128 annualFee = uint128(hPrice * hTaxRate)/hTax100;
+        require(msg.value > _remainOnNft + subDomainPrices[root] + annualFee + 0.1 ton, value_is_less_than_required);
+
+        TvmCell encoded = abi.encode(root, name);
+        uint256 domainHash = tvm.hash(encoded);
+        require(!mintedNames[domainHash], already_registered);
+
+        tvm.rawReserve(0, 4);
+
+        uint256 id = uint256(_totalSupply);
+        _totalSupply++;
+
+        TvmCell codeNft = _buildNftCode(address(this));
+        TvmCell stateNft = _buildNftState(codeNft, id);
+        
+        address nftAddr = new NameNft{ stateInit: stateNft, value: msg.value - subDomainPrices[root] - annualFee, flag: 0 }(
+            msg.sender,
+            root,
+            name,
+            hPrice,
+            msg.sender,
+            _remainOnNft,
+            json,
+            _codeIndex,
+            _indexDeployValue,
+            _indexDestroyValue
+        );
+        mintedNames[domainHash] = true;
+        idToOwner[id] = msg.sender;
+        adddressToOwner[nftAddr] = msg.sender;
+        emit NftCreated(id, nftAddr, msg.sender, msg.sender, msg.sender);
+    }
+
+    function setSubDomainPrice(
+        address domain, 
+        uint128 price
+    ) external {
+        tvm.accept();
+        tvm.rawReserve(0, 4);
+        require(msg.sender == adddressToOwner[domain]);        
+        subDomainPrices[domain] = price;
+        msg.sender.transfer({value: 0, flag: 128 + 2});
+    }
+
+    function getSubDomainPrice(address domain) external view responsible returns(uint128 subPrice) {
+        return {value: 0, flag: 64, bounce: false} (subDomainPrices[domain]);
+    }
+
+    function _buildNftState(
+        TvmCell code,
+        uint256 id
+    ) internal pure virtual override(TIP4_2Collection, TIP4_3Collection) returns (TvmCell) {
+        return tvm.buildStateInit({ contr: NameNft, varInit: { _id: id }, code: code });
+    }
+}
